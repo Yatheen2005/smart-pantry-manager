@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Smart Pantry Manager</string>
+    <string name="title_pantry_list">My Pantry Inventory</string>
+    <string name="title_add_ingredient">Add Pantry Ingredient</string>
+    <string name="title_edit_ingredient">Edit Pantry Ingredient</string>
+    <string name="title_suggested_recipes">Suggested Recipes (Strict Match)</string>
+    <string name="title_recipe_detail">Recipe Details &amp; Method</string>
+    <string name="title_settings">Pantry Settings</string>
+
+    <string name="nav_pantry">My Pantry</string>
+    <string name="nav_recipes">Suggested Recipes</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="empty_pantry_message">Your pantry is currently empty.
+Tap the + button below to add leftover ingredients at home.</string>
+    <string name="no_recipes_match_message">No recipes match your pantry yet — add more ingredients to unlock full-match recipes!</string>
+    <string name="strict_match_banner">Showing ONLY recipes where 100% of required ingredients and quantities are in your pantry right now.</string>
+    <string name="almost_there_header">Almost There (Missing Only 1 Ingredient)</string>
+
+    <string name="hint_ingredient_name">Ingredient Name (e.g. Tomatoes, Eggs, Milk)</string>
+    <string name="hint_quantity">Quantity (e.g. 250, 4, 1.5)</string>
+    <string name="hint_expiry_date">Optional Expiry Date (YYYY-MM-DD)</string>
+    <string name="btn_save_ingredient">Save Ingredient</string>
+    <string name="btn_delete_ingredient">Delete Ingredient</string>
+    <string name="btn_find_recipes">Find Recipes I Can Cook Now</string>
+    <string name="btn_cook_recipe">Mark as Cooked (Deduct Used Ingredients)</string>
+    <string name="btn_seed_sample_pantry">Load Sample Pantry Ingredients</string>
+    <string name="btn_clear_pantry">Clear All Pantry Items</string>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary_green">#1B5E20</color>
+    <color name="primary_green_dark">#0D3B10</color>
+    <color name="primary_green_light">#E8F5E9</color>
+    <color name="accent_amber">#EF6C00</color>
+    <color name="accent_amber_light">#FFF3E0</color>
+    <color name="danger_red">#C62828</color>
+    <color name="danger_red_light">#FFEBEE</color>
+    <color name="surface_bg">#F7F9F7</color>
+    <color name="card_white">#FFFFFF</color>
+    <color name="text_primary">#1C2526</color>
+    <color name="text_secondary">#546E7A</color>
+    <color name="divider_color">#CFD8DC</color>
+</resources>
