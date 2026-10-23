@@ -1,53 +1,105 @@
-# Smart Pantry Manager — Mobile App Development 700
+# Smart Pantry Manager (Mobile App Development 700)
 
-A native Java Android application designed to help households cut food waste by tracking pantry ingredients and suggesting recipes using **strictly** the leftover ingredients already available at home in sufficient quantities.
+A native **Java** Android app that helps a household cut food waste. The user records the
+ingredients they already have at home (their *pantry*), and the app suggests **only** the recipes
+they can cook right now with those ingredients, in the required quantities, without a shopping trip.
 
-## 1. Core Features & Assignment Alignment
+No Kotlin, no Google Maps, no location/GPS and no network access are used.
 
-- **Full SQLite Pantry CRUD (`PantryDatabaseHelper`)**: Add, view, update, and delete pantry items with ingredient name, numeric quantity, measurement unit (`g`, `kg`, `ml`, `l`, `tsp`, `tbsp`, `cup`, `pcs`, `clove`, `slice`, `tin`, `oz`, `lb`), and optional expiry date (`YYYY-MM-DD`).
-- **Pre-Loaded Persistent Recipe Collection (`RecipeSeeder`)**: Automatically seeds **18 practical household and South African recipes** into the relational SQLite database on first run.
-- **Strict-Matching Engine (`StrictRecipeMatcher`)**:
-  - A recipe is suggested in the main list **if and only if every single required ingredient is present in the user's pantry in at least the required quantity**.
-  - Recipes missing even 1 out of 5 ingredients (or having an insufficient quantity of any single ingredient) are strictly excluded from the main suggestions list.
-  - Includes a clearly separated **"Almost There (Missing Only 1 Ingredient)"** bonus section below a divider.
-- **Robust Real-World Normalization (`IngredientNormalizer` & `UnitConverter`)**:
-  - Normalizes singular/plural forms (`"Tomatoes"` ↔ `"tomato"`, `"Potatoes"` ↔ `"potato"`, `"Berries"` ↔ `"berry"`, `"Loaves"` ↔ `"loaf"`, `"Large Eggs"` ↔ `"egg"`) and common culinary synonyms (`"Mealie Meal"` ↔ `"maize meal"`, `"Ground Beef"` ↔ `"beef mince"`).
-  - Automatically converts compatible units (`kg` ↔ `g`, `l` ↔ `ml` ↔ `cup` ↔ `tbsp` ↔ `tsp`, `lb`/`oz` ↔ `g`).
-- **Five Distinct Activities & Custom RecyclerViews**:
-  1. `MainActivity` — Pantry inventory list (`RecyclerView` + `PantryAdapter`), expiry alerts banner, quick navigation.
-  2. `AddEditIngredientActivity` — Data entry form with `InputValidator`, unit `Spinner`, and `DatePickerDialog`.
-  3. `SuggestedRecipesActivity` — Strict recipe suggestions (`RecyclerView` + `RecipeAdapter`), zero-match feedback state, and separated "Almost There" bonus list.
-  4. `RecipeDetailActivity` — Full ingredient checklist with pantry availability comparison, preparation method, and **"Mark as Cooked (Deduct Used Ingredients)"** action.
-  5. `SettingsActivity` — Persistent user preferences (`SharedPreferences`) for expiry alert toggles, warning days threshold, and sample data loading.
-- **Strict Scope Compliance**: Built 100% in Java (`minSdk 24`, `targetSdk 34`). Contains **zero** Kotlin code and **zero** Google Maps, GPS, or location-based SDKs.
+## Features
 
-## 2. Why SQLite (`SQLiteOpenHelper`) Was Chosen
+| Requirement | Where it is implemented |
+|---|---|
+| Add / view / edit / delete pantry items (name, quantity, unit, optional expiry date) | `AddEditIngredientActivity`, `MainActivity`, `PantryDatabaseHelper` |
+| RecyclerView + custom Adapter bound to the database | `MainActivity` + `PantryAdapter`; `SuggestedRecipesActivity` + `RecipeAdapter` |
+| 18 recipes stored in the database, seeded on first run | `RecipeSeeder` (called from `PantryDatabaseHelper.onCreate`) |
+| Suggested Recipes using the strict-matching rule | `SuggestedRecipesActivity` + `StrictRecipeMatcher` |
+| Recipe detail (ingredients + method) | `RecipeDetailActivity` |
+| Settings screen | `SettingsActivity` + `UserPreferencesManager` (SharedPreferences) |
+| Navigation element | Bottom navigation bar (`NavigationHelper`) and toolbar Up arrow |
+| Intents that pass data | Pantry item id → edit screen; recipe id → detail screen |
+| Input validation | `InputValidator` (name, quantity, unit, real calendar date) |
+| Zero-match and empty-pantry feedback | `SuggestedRecipesActivity`, `MainActivity` |
+| Optional "Almost There" list (missing exactly 1 ingredient), clearly separated | `StrictRecipeMatcher.getAlmostThereMatches` |
 
-We selected **SQLite via `SQLiteOpenHelper`** (Section 3.2 Option 1) for four architectural reasons:
-1. **100% Offline Reliability**: Users check their kitchen cupboards and cook regardless of internet connectivity; local on-device storage guarantees zero network latency and zero cloud downtime.
-2. **Relational Integrity for Strict Matching**: Recipes and their required ingredients form a classic `1:N` relational schema (`recipes` → `recipe_ingredients` with `FOREIGN KEY ... ON DELETE CASCADE`), which maps naturally to normalized SQLite tables.
-3. **Zero External Paid Dependencies**: Unlike Firebase or hosted PostgreSQL tiers that require API keys, billing accounts, or external REST servers, SQLite is embedded directly into the Android OS runtime.
-4. **Module Curriculum Alignment**: Directly demonstrates mastery of Android's native `SQLiteOpenHelper`, `SQLiteDatabase` transactions, `ContentValues`, and `Cursor` iteration covered in Mobile App Development 700.
+Extras: duplicate detection on add (merge into the existing entry or keep a separate batch),
+expiry badges and alerts, and **Mark as Cooked**, which deducts the used quantities in one database
+transaction, using the ingredients that expire soonest first.
 
-## 3. Setup & Run Instructions
+## Strict matching: how it decides
 
-### Prerequisites
-- **Android Studio** Hedgehog (2023.1.1) or newer (Iguana / Jellyfish / Koala / Ladybug)
-- **JDK 11 or JDK 17** (bundled with Android Studio)
-- **Android SDK Platform 34** and an Android Emulator (API 24+) or physical Android device
+A recipe is suggested **if and only if every required ingredient** is in the pantry in **at least
+the required quantity** (`StrictRecipeMatcher.evaluateRecipe`). For each required ingredient:
 
-### Running the Application
-1. Open **Android Studio** and select **File → Open...**, then choose the `SmartPantryManager` folder.
-2. Allow Gradle to sync dependencies (`appcompat`, `material`, `recyclerview`, `cardview`, `constraintlayout`).
-3. Select an emulator (e.g., Pixel 6 API 34) or connected Android device and click **Run 'app'** (`Shift + F10`).
-4. **Quick Marker Testing Tip**: On the empty Pantry screen (or in **Settings**), tap **"Load Sample Pantry Ingredients"** to immediately populate 12 realistic pantry items and observe strict recipe matching in action.
+1. Both names are normalized by `IngredientNormalizer` (lower case, punctuation removed,
+   singular form, descriptive words such as *fresh/large* removed, small synonym table).
+   The **whole** canonical names are compared with `equals`, never with substring checks, so
+   *Eggplant* does not count as *Egg* and *Cheese* does not count as *Cheddar Cheese*.
+2. All pantry rows with that name are added together after converting to the recipe's unit
+   (`UnitConverter`): g/kg/mg/oz/lb with each other, ml/l/tsp/tbsp/cup/fl oz with each other.
+3. If the total is short, or the ingredient is absent, the recipe is **not** suggested.
 
-### Running Automated Tests
-- **Unit Tests (JUnit 4)**:
-  ```bash
-  ./gradlew testDebugUnitTest
-  ```
-- **Android Instrumented Tests (SQLite CRUD & Persistence)**:
-  ```bash
-  ./gradlew connectedDebugAndroidTest
-  ```
+Deliberate limitations, chosen to avoid false "you can cook this" results:
+
+* **Mass and volume are not converted into each other.** 1 cup of flour is about 125 g but 1 cup of
+  milk is about 250 g, so a general rule would be wrong. The detail screen explains the unit clash
+  so the user can edit the item.
+* **Different count units are not interchangeable** (`pcs` ≠ `clove` ≠ `slice` ≠ `tin`).
+* A generic name does not satisfy a specific one (*Chicken* does not satisfy *Chicken Breast*).
+* Water is assumed to be available and is not listed as an ingredient.
+* The synonym list is small and hand-written; it is not a full natural-language solution.
+* Expired items are ignored by default (Settings → *Ignore expired ingredients when matching*).
+
+## Database choice: SQLite (`SQLiteOpenHelper`)
+
+* **Works offline.** A pantry app is used in the kitchen; local storage needs no network or account.
+* **Relational data.** A recipe has many ingredients, which maps directly onto a
+  `recipes` → `recipe_ingredients` one-to-many relationship with a foreign key.
+* **No external services.** No API keys, billing or server to maintain (unlike Firebase or PostgreSQL).
+* **Matches the module.** `SQLiteOpenHelper`, `ContentValues`, `Cursor` and transactions are what
+  the persistent-data chapter covers.
+
+Tables: `pantry_items` (full CRUD), `recipes` (18 seeded rows) and `recipe_ingredients`
+(foreign key to `recipes`). The database file lives in the app's private storage, so data
+remains after the app is closed or the device restarts.
+
+## Project structure
+
+```
+app/src/main/java/za/ac/richfield/smartpantry/
+├── adapter/   PantryAdapter, RecipeAdapter            (RecyclerView adapters)
+├── database/  PantryDatabaseHelper, RecipeSeeder, SamplePantryData
+├── model/     PantryItem, Recipe, RecipeIngredient, IngredientCheck, RecipeMatchResult
+├── ui/        MainActivity, AddEditIngredientActivity, SuggestedRecipesActivity,
+│              RecipeDetailActivity, SettingsActivity, NavigationHelper
+└── util/      StrictRecipeMatcher, IngredientNormalizer, UnitConverter,
+               InputValidator, UserPreferencesManager
+```
+
+The matching, normalizing, unit and validation classes have no Android dependencies, so they are
+unit tested on the JVM.
+
+## Setup and run
+
+Requirements: **Android Studio 2026.2 or newer** (the project uses Android Gradle Plugin 9.4.1 and
+Gradle 9.8.2 through the included wrapper), **Android SDK Platform 37**, and an emulator or device
+running Android 7.0 (API 24) or newer. The JDK bundled with Android Studio is used.
+
+1. In Android Studio choose **File → Open** and select the `SmartPantryManager` folder (the one that
+   contains `settings.gradle`, **not** `app/src`).
+2. Wait for the Gradle sync to finish. If prompted, install SDK Platform 37.
+3. Choose an emulator or device and press **Run 'app'** (Shift + F10).
+4. To try matching quickly: on the empty pantry screen tap **Load Sample Pantry Ingredients**.
+   This loads 13 items (one deliberately expired); 6 recipes are suggested and 9 are "Almost There".
+   Adding **Sugar 100 g** makes *Classic French Toast* appear; deleting it removes it again.
+
+Command line (Windows: `gradlew.bat`, macOS/Linux: `./gradlew`):
+
+```bash
+gradlew assembleDebug              # build the APK
+gradlew testDebugUnitTest          # JVM unit tests (matching, units, names, validation, seed data)
+gradlew connectedDebugAndroidTest  # on-device tests: SQLite CRUD/persistence + Espresso UI flows
+```
+
+> The Espresso UI tests drive the real screens and therefore **clear the pantry** on the device
+> they run on. The SQLite tests use a separate test database file.
