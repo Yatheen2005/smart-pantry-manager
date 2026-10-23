@@ -116,20 +116,26 @@ public class PantryItem implements Serializable {
             if (today == null || expiry == null) {
                 return Long.MAX_VALUE;
             }
+            // Round rather than truncate: a day can be 23 or 25 hours across daylight-saving changes
             long diffMillis = expiry.getTime() - today.getTime();
-            return TimeUnit.MILLISECONDS.toDays(diffMillis);
+            return Math.round(diffMillis / (double) TimeUnit.DAYS.toMillis(1));
         } catch (ParseException e) {
             return Long.MAX_VALUE;
         }
     }
 
     public long getDaysUntilExpiry() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-        return getDaysUntilExpiry(sdf.format(new Date()));
+        return getDaysUntilExpiry(todayIsoDate());
     }
 
+    /** An item is expired from the day AFTER its expiry date (it is still usable on the date). */
     public boolean isExpired() {
         return getDaysUntilExpiry() < 0;
+    }
+
+    /** Today's date in the same YYYY-MM-DD format used for expiry dates. */
+    public static String todayIsoDate() {
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
     }
 
     public boolean isExpiringSoon(int warningDaysThreshold) {
@@ -148,6 +154,6 @@ public class PantryItem implements Serializable {
         if (Math.abs(value - Math.rint(value)) < 1e-6) {
             return String.format(Locale.US, "%d", Math.round(value));
         }
-        return String.format(Locale.US, "%.2f", value).replaceAll("0+$", "").replaceAll("\.$", "");
+        return String.format(Locale.US, "%.2f", value).replaceAll("0+$", "").replaceAll("\\.$", "");
     }
 }

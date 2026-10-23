@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 /**
  * Manages persistent application settings via Android SharedPreferences for the Settings screen.
+ * (Settings are small key/value pairs, so SharedPreferences is used instead of the SQLite database.)
  */
 public class UserPreferencesManager {
 
@@ -13,10 +14,6 @@ public class UserPreferencesManager {
     private static final String KEY_EXPIRY_THRESHOLD_DAYS = "expiry_threshold_days";
     private static final String KEY_EXCLUDE_EXPIRED_MATCHING = "exclude_expired_matching";
     private static final String KEY_SHOW_ALMOST_THERE = "show_almost_there";
-    private static final String KEY_PREFERRED_UNIT_SYSTEM = "preferred_unit_system";
-
-    public static final String UNIT_SYSTEM_METRIC = "METRIC";
-    public static final String UNIT_SYSTEM_IMPERIAL = "IMPERIAL";
 
     private final SharedPreferences prefs;
 
@@ -54,13 +51,5 @@ public class UserPreferencesManager {
 
     public void setShowAlmostThereSection(boolean show) {
         prefs.edit().putBoolean(KEY_SHOW_ALMOST_THERE, show).apply();
-    }
-
-    public String getPreferredUnitSystem() {
-        return prefs.getString(KEY_PREFERRED_UNIT_SYSTEM, UNIT_SYSTEM_METRIC);
-    }
-
-    public void setPreferredUnitSystem(String system) {
-        prefs.edit().putString(KEY_PREFERRED_UNIT_SYSTEM, system).apply();
     }
 }
