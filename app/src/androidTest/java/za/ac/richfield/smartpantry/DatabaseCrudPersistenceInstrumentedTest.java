@@ -17,16 +17,19 @@ import za.ac.richfield.smartpantry.model.PantryItem;
 import za.ac.richfield.smartpantry.model.Recipe;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Android Instrumented Test verifying SQLite CRUD operations, 18-recipe seeding,
- * and persistence across database connection closure and reopening.
+ * Runs on a device/emulator against a real SQLite file. Uses a separate database file so the
+ * app's real pantry is never touched.
  */
 @RunWith(AndroidJUnit4.class)
 public class DatabaseCrudPersistenceInstrumentedTest {
+
+    private static final String TEST_DB = "test_smart_pantry.db";
 
     private Context context;
     private PantryDatabaseHelper dbHelper;
@@ -34,58 +37,151 @@ public class DatabaseCrudPersistenceInstrumentedTest {
     @Before
     public void setUp() {
         context = ApplicationProvider.getApplicationContext();
-        dbHelper = new PantryDatabaseHelper(context);
-        dbHelper.clearAllPantryItems();
+        context.deleteDatabase(TEST_DB);
+        dbHelper = new PantryDatabaseHelper(context, TEST_DB);
     }
 
     @After
     public void tearDown() {
         dbHelper.close();
+        context.deleteDatabase(TEST_DB);
     }
 
     @Test
-    public void testPreloadedRecipesSeededOnFirstRun() {
+    public void recipesAreSeededOnFirstCreation() {
         List<Recipe> recipes = dbHelper.getAllRecipesWithIngredients();
-        assertTrue("Database must contain at least 15-20 preloaded recipes", recipes.size() >= 18);
-        for (Recipe r : recipes) {
-            assertFalseOrNonEmpty(r.getTitle());
-            assertTrue("Each seeded recipe must have required ingredients", !r.getIngredients().isEmpty());
+        assertEquals(18, recipes.size());
+        assertEquals(18, dbHelper.getRecipeCount());
+        for (Recipe recipe : recipes) {
+            assertFalse(recipe.getTitle().trim().isEmpty());
+            assertFalse(recipe.getTitle(), recipe.getIngredients().isEmpty());
         }
+        Recipe first = dbHelper.getRecipeById(recipes.get(0).getId());
+        assertNotNull(first);
+        assertEquals(recipes.get(0).getIngredients().size(), first.getIngredients().size());
     }
 
     @Test
-    public void testFullCrudCycleAndSessionPersistence() {
-        // 1. CREATE
-        PantryItem item = new PantryItem("Fresh Tomatoes", "tomato", 5.0, "pcs", "2026-11-01");
-        long id = dbHelper.insertPantryItem(item);
+    public void fullCrudCycle_persistsAcrossClosingAndReopeningTheDatabase() {
+        // CREATE
+        long id = dbHelper.insertPantryItem(new PantryItem("Fresh Tomatoes", null, 5, "pcs", "2026-11-01"));
         assertTrue(id > 0);
 
-        // 2. Close helper and reopen a new instance to verify disk persistence
+        // Close the connection and open a brand-new helper on the same file
         dbHelper.close();
-        PantryDatabaseHelper reopenedDb = new PantryDatabaseHelper(context);
+        dbHelper = new PantryDatabaseHelper(context, TEST_DB);
 
-        // 3. READ
-        PantryItem fetched = reopenedDb.getPantryItemById(id);
+        // READ
+        PantryItem fetched = dbHelper.getPantryItemById(id);
         assertNotNull(fetched);
         assertEquals("Fresh Tomatoes", fetched.getName());
         assertEquals("tomato", fetched.getNormalizedName());
-        assertEquals(5.0, fetched.getQuantity(), 1e-4);
+        assertEquals(5.0, fetched.getQuantity(), 1e-9);
+        assertEquals("2026-11-01", fetched.getExpiryDate());
+        assertEquals(1, dbHelper.getAllPantryItems().size());
 
-        // 4. UPDATE
-        fetched.setQuantity(12.0);
-        int rowsUpdated = reopenedDb.updatePantryItem(fetched);
-        assertEquals(1, rowsUpdated);
-        assertEquals(12.0, reopenedDb.getPantryItemById(id).getQuantity(), 1e-4);
+        // UPDATE (also re-normalizes the name)
+        fetched.setName("Cherry Tomatoes");
+        fetched.setQuantity(12);
+        assertEquals(1, dbHelper.updatePantryItem(fetched));
+        dbHelper.close();
+        dbHelper = new PantryDatabaseHelper(context, TEST_DB);
+        PantryItem updated = dbHelper.getPantryItemById(id);
+        assertEquals(12.0, updated.getQuantity(), 1e-9);
+        assertEquals("cherry tomato", updated.getNormalizedName());
 
-        // 5. DELETE
-        int rowsDeleted = reopenedDb.deletePantryItem(id);
-        assertEquals(1, rowsDeleted);
-        assertNull(reopenedDb.getPantryItemById(id));
-        reopenedDb.close();
+        // DELETE
+        assertEquals(1, dbHelper.deletePantryItem(id));
+        assertNull(dbHelper.getPantryItemById(id));
+        assertEquals(0, dbHelper.deletePantryItem(id));
     }
 
-    private void assertFalseOrNonEmpty(String value) {
-        assertNotNull(value);
-        assertTrue(!value.trim().isEmpty());
+    @Test
+    public void optionalExpiryDate_isStoredAsNull() {
+        long id = dbHelper.insertPantryItem(new PantryItem("Salt", null, 200, "g", "  "));
+        assertFalse(dbHelper.getPantryItemById(id).hasExpiryDate());
+    }
+
+    @Test
+    public void findByName_usesNormalizedNames() {
+        dbHelper.insertPantryItem(new PantryItem("Fresh Tomatoes", null, 2, "pcs", null));
+        dbHelper.insertPantryItem(new PantryItem("Onion", null, 1, "pcs", null));
+        assertEquals(1, dbHelper.findPantryItemsByName("tomato").size());
+        assertEquals(0, dbHelper.findPantryItemsByName("Cherry").size());
+    }
+
+    @Test
+    public void cooking_deductsIngredientsAndDeletesUsedUpRows() {
+        dbHelper.loadSamplePantry();
+        Recipe toastie = findRecipe("Golden Grilled Cheese Toastie"); // 2 slice bread, 60 g cheddar, 15 g butter
+
+        assertTrue(dbHelper.consumeRecipeIngredients(toastie, true));
+
+        assertEquals(6.0, quantityOf("Bread Slices"), 1e-9);    // 8 - 2
+        assertEquals(140.0, quantityOf("Cheddar Cheese"), 1e-9); // 200 - 60
+        assertEquals(235.0, quantityOf("Butter"), 1e-9);         // 250 - 15
+    }
+
+    @Test
+    public void cooking_convertsUnitsWhenDeducting() {
+        dbHelper.loadSamplePantry(); // milk is stored as 1 l
+        Recipe pancakes = findRecipe("Fluffy Homemade Pancakes"); // needs 250 ml milk, 200 g flour
+
+        assertTrue(dbHelper.consumeRecipeIngredients(pancakes, true));
+
+        assertEquals(0.75, quantityOf("Full Cream Milk"), 1e-9); // 1 l - 250 ml
+        assertEquals(0.8, quantityOf("Cake Flour"), 1e-9);       // 1 kg - 200 g
+    }
+
+    @Test
+    public void cooking_isRefusedAndChangesNothingWhenRecipeIsNotAStrictMatch() {
+        dbHelper.insertPantryItem(new PantryItem("Bread", null, 2, "slice", null));
+        dbHelper.insertPantryItem(new PantryItem("Butter", null, 15, "g", null)); // no cheese
+        Recipe toastie = findRecipe("Golden Grilled Cheese Toastie");
+
+        assertFalse(dbHelper.consumeRecipeIngredients(toastie, true));
+        assertEquals(2.0, quantityOf("Bread"), 1e-9);
+        assertEquals(15.0, quantityOf("Butter"), 1e-9);
+    }
+
+    @Test
+    public void cooking_usesUpRowsThatReachZero() {
+        dbHelper.insertPantryItem(new PantryItem("Bread", null, 2, "slice", null));
+        dbHelper.insertPantryItem(new PantryItem("Cheddar", null, 60, "g", null));
+        dbHelper.insertPantryItem(new PantryItem("Butter", null, 100, "g", null));
+
+        assertTrue(dbHelper.consumeRecipeIngredients(findRecipe("Golden Grilled Cheese Toastie"), true));
+
+        List<PantryItem> left = dbHelper.getAllPantryItems();
+        assertEquals(1, left.size());
+        assertEquals("Butter", left.get(0).getName());
+    }
+
+    @Test
+    public void databaseUpgrade_keepsTheUsersPantry() {
+        dbHelper.insertPantryItem(new PantryItem("Eggs", null, 6, "pcs", null));
+
+        dbHelper.onUpgrade(dbHelper.getWritableDatabase(), 1, 2);
+
+        assertEquals(1, dbHelper.getAllPantryItems().size());
+        assertEquals(18, dbHelper.getRecipeCount());
+    }
+
+    private Recipe findRecipe(String title) {
+        for (Recipe recipe : dbHelper.getAllRecipesWithIngredients()) {
+            if (recipe.getTitle().equals(title)) {
+                return recipe;
+            }
+        }
+        throw new AssertionError("Recipe not seeded: " + title);
+    }
+
+    private double quantityOf(String name) {
+        for (PantryItem item : dbHelper.getAllPantryItems()) {
+            if (item.getName().equals(name)) {
+                return item.getQuantity();
+            }
+        }
+        throw new AssertionError("Not in pantry: " + name);
     }
 }
