@@ -5,6 +5,8 @@
     <color name="primary_green_light">#E8F5E9</color>
     <color name="accent_amber">#EF6C00</color>
     <color name="accent_amber_light">#FFF3E0</color>
+    <!-- Darker amber for TEXT: about 6.5:1 contrast on accent_amber_light (WCAG AA needs 4.5:1) -->
+    <color name="accent_amber_text">#92400E</color>
     <color name="danger_red">#C62828</color>
     <color name="danger_red_light">#FFEBEE</color>
     <color name="surface_bg">#F7F9F7</color>

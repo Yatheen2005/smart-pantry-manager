@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/pantryRoot"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/surface_bg">
 
-    <!-- Top Summary Banner -->
+    <!-- Top summary banner -->
     <LinearLayout
         android:id="@+id/layoutSummaryBanner"
         android:layout_width="match_parent"
@@ -19,7 +20,6 @@
             android:id="@+id/tvPantrySummary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="0 Ingredients in Pantry"
             android:textColor="@color/primary_green_dark"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -29,8 +29,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:textColor="@color/accent_amber"
-            android:textSize="13sp"
+            android:textColor="@color/accent_amber_text"
+            android:textSize="14sp"
             android:visibility="gone" />
 
         <Button
@@ -43,7 +43,7 @@
             android:textColor="@color/card_white" />
     </LinearLayout>
 
-    <!-- RecyclerView bound to SQLite pantry_items table -->
+    <!-- RecyclerView bound to the SQLite pantry_items table (via PantryAdapter) -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rvPantryItems"
         android:layout_width="match_parent"
@@ -51,14 +51,18 @@
         android:layout_above="@id/bottomNavigation"
         android:layout_below="@id/layoutSummaryBanner"
         android:clipToPadding="false"
-        android:padding="12dp" />
+        android:paddingStart="12dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="88dp" />
 
-    <!-- Empty State View when pantry has 0 items -->
+    <!-- Empty state shown when the pantry has no items -->
     <LinearLayout
         android:id="@+id/layoutEmptyPantry"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_centerInParent="true"
+        android:layout_above="@id/bottomNavigation"
+        android:layout_below="@id/layoutSummaryBanner"
         android:gravity="center"
         android:orientation="vertical"
         android:padding="32dp"
@@ -81,7 +85,7 @@
             android:text="@string/btn_seed_sample_pantry" />
     </LinearLayout>
 
-    <!-- Floating Action Button to Add New Pantry Item -->
+    <!-- Floating Action Button: add a new pantry item -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabAddIngredient"
         android:layout_width="wrap_content"
@@ -90,11 +94,11 @@
         android:layout_alignParentEnd="true"
         android:layout_margin="16dp"
         android:contentDescription="@string/title_add_ingredient"
-        android:src="@android:drawable/ic_input_add"
+        android:src="@drawable/ic_add"
         app:backgroundTint="@color/accent_amber"
         app:tint="@color/card_white" />
 
-    <!-- Bottom Navigation Bar -->
+    <!-- Bottom navigation bar (Pantry / Recipes / Settings) -->
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNavigation"
         android:layout_width="match_parent"

@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/addEditRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/surface_bg"
+    android:clipToPadding="false"
     android:padding="16dp">
 
     <LinearLayout
@@ -17,6 +19,7 @@
             android:id="@+id/tvFormHeading"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:accessibilityHeading="true"
             android:text="@string/title_add_ingredient"
             android:textColor="@color/primary_green_dark"
             android:textSize="20sp"
@@ -26,7 +29,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Ingredient Name *"
+            android:labelFor="@id/etIngredientName"
+            android:text="@string/label_ingredient_name"
             android:textColor="@color/text_primary"
             android:textStyle="bold" />
 
@@ -35,14 +39,17 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="@string/hint_ingredient_name"
+            android:importantForAutofill="no"
             android:inputType="textCapWords"
+            android:maxLength="50"
             android:minHeight="48dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="Quantity Available *"
+            android:labelFor="@id/etQuantity"
+            android:text="@string/label_quantity"
             android:textColor="@color/text_primary"
             android:textStyle="bold" />
 
@@ -51,6 +58,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="@string/hint_quantity"
+            android:importantForAutofill="no"
             android:inputType="numberDecimal"
             android:minHeight="48dp" />
 
@@ -58,7 +66,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="Measurement Unit *"
+            android:labelFor="@id/spinnerUnit"
+            android:text="@string/label_unit"
             android:textColor="@color/text_primary"
             android:textStyle="bold" />
 
@@ -66,19 +75,22 @@
             android:id="@+id/spinnerUnit"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:layout_marginTop="4dp" />
+            android:layout_marginTop="4dp"
+            android:contentDescription="@string/label_unit" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="Expiry Date (Optional - YYYY-MM-DD)"
+            android:labelFor="@id/etExpiryDate"
+            android:text="@string/label_expiry_date"
             android:textColor="@color/text_primary"
             android:textStyle="bold" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <EditText
@@ -87,7 +99,9 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:hint="@string/hint_expiry_date"
+                android:importantForAutofill="no"
                 android:inputType="date"
+                android:maxLength="10"
                 android:minHeight="48dp" />
 
             <Button
@@ -96,7 +110,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
-                android:text="Pick Date" />
+                android:text="@string/btn_pick_date" />
         </LinearLayout>
 
         <TextView
@@ -104,6 +118,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
+            android:accessibilityLiveRegion="polite"
             android:background="@drawable/bg_badge_red"
             android:padding="10dp"
             android:textColor="@color/danger_red"

@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="10dp"
+    android:foreground="?attr/selectableItemBackground"
     app:cardBackgroundColor="@color/card_white"
     app:cardCornerRadius="10dp"
     app:cardElevation="2dp">
@@ -25,22 +27,23 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Classic Scrambled Eggs on Toast"
                 android:textColor="@color/text_primary"
                 android:textSize="17sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                tools:text="Classic Scrambled Eggs on Toast" />
 
             <TextView
                 android:id="@+id/tvMatchBadge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
                 android:background="@drawable/bg_badge_green"
                 android:paddingHorizontal="8dp"
                 android:paddingVertical="4dp"
-                android:text="100% READY"
                 android:textColor="@color/primary_green_dark"
-                android:textSize="11sp"
-                android:textStyle="bold" />
+                android:textSize="12sp"
+                android:textStyle="bold"
+                tools:text="@string/badge_ready" />
         </LinearLayout>
 
         <TextView
@@ -48,18 +51,18 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Breakfast • 10 mins • Serves 1 • 5 Ingredients"
             android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
+            android:textSize="13sp"
+            tools:text="Breakfast • 10 min • Serves 1 • 5 ingredients" />
 
         <TextView
             android:id="@+id/tvMatchSummary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="All 5 required ingredients available in sufficient quantity."
             android:textColor="@color/primary_green"
-            android:textSize="13sp" />
+            android:textSize="14sp"
+            tools:text="All 5 ingredients are in your pantry in the required quantities." />
 
     </LinearLayout>
 

@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="10dp"
+    android:foreground="?attr/selectableItemBackground"
     app:cardBackgroundColor="@color/card_white"
     app:cardCornerRadius="10dp"
     app:cardElevation="2dp">
@@ -25,20 +27,20 @@
                 android:id="@+id/tvIngredientName"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Fresh Tomatoes"
                 android:textColor="@color/text_primary"
                 android:textSize="17sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                tools:text="Fresh Tomatoes" />
 
             <TextView
                 android:id="@+id/tvQuantityUnit"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Quantity: 4 pcs"
                 android:textColor="@color/primary_green"
                 android:textSize="15sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                tools:text="Available: 4 pcs" />
 
             <TextView
                 android:id="@+id/tvExpiryBadge"
@@ -48,9 +50,9 @@
                 android:background="@drawable/bg_badge_green"
                 android:paddingHorizontal="8dp"
                 android:paddingVertical="3dp"
-                android:text="Expires: 2026-10-25"
                 android:textColor="@color/primary_green_dark"
-                android:textSize="12sp" />
+                android:textSize="13sp"
+                tools:text="Expires 2026-10-25" />
         </LinearLayout>
 
         <Button
@@ -58,7 +60,8 @@
             style="@style/Widget.MaterialComponents.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Edit"
+            android:minWidth="48dp"
+            android:text="@string/btn_edit"
             android:textColor="@color/primary_green" />
 
         <Button
@@ -66,7 +69,8 @@
             style="@style/Widget.MaterialComponents.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Delete"
+            android:minWidth="48dp"
+            android:text="@string/btn_delete"
             android:textColor="@color/danger_red" />
     </LinearLayout>
 
