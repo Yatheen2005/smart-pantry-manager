@@ -17,7 +17,6 @@ import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
 import java.util.List;
-import java.util.Locale;
 
 import za.ac.richfield.smartpantry.R;
 import za.ac.richfield.smartpantry.adapter.PantryAdapter;
@@ -26,10 +25,13 @@ import za.ac.richfield.smartpantry.model.PantryItem;
 import za.ac.richfield.smartpantry.util.UserPreferencesManager;
 
 /**
- * Screen 1: Pantry List Activity.
- * Displays all current ingredients in the user's SQLite pantry using a RecyclerView and
- * PantryAdapter, highlights expiring items, and navigates to Add/Edit, Suggested Recipes,
- * and Settings screens via explicit Intents.
+ * Screen 1: Pantry List (launcher Activity).
+ *
+ * Shows every row of the SQLite pantry_items table in a RecyclerView (PantryAdapter), shows an
+ * empty state when there are no items, and navigates to the other screens with explicit Intents.
+ *
+ * Lifecycle: views are set up once in onCreate(); the list is re-read from the database in
+ * onResume(), so it is always current after returning from the Add/Edit or Recipe screens.
  */
 public class MainActivity extends AppCompatActivity implements PantryAdapter.OnPantryItemActionListener {
 
@@ -41,12 +43,14 @@ public class MainActivity extends AppCompatActivity implements PantryAdapter.OnP
     private TextView tvExpiryAlertBanner;
     private RecyclerView rvPantryItems;
     private LinearLayout layoutEmptyPantry;
+    private BottomNavigationView bottomNav;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         setTitle(R.string.title_pantry_list);
+        NavigationHelper.applyTopSystemBarPadding(findViewById(R.id.pantryRoot));
 
         dbHelper = PantryDatabaseHelper.getInstance(this);
         prefsManager = new UserPreferencesManager(this);
@@ -58,98 +62,72 @@ public class MainActivity extends AppCompatActivity implements PantryAdapter.OnP
         Button btnQuickSuggest = findViewById(R.id.btnQuickSuggest);
         Button btnLoadDemoPantry = findViewById(R.id.btnLoadDemoPantry);
         FloatingActionButton fabAddIngredient = findViewById(R.id.fabAddIngredient);
-        BottomNavigationView bottomNav = findViewById(R.id.bottomNavigation);
+        bottomNav = findViewById(R.id.bottomNavigation);
 
         pantryAdapter = new PantryAdapter(this);
         rvPantryItems.setLayoutManager(new LinearLayoutManager(this));
         rvPantryItems.setAdapter(pantryAdapter);
 
-        fabAddIngredient.setOnClickListener(v -> {
-            Intent intent = new Intent(MainActivity.this, AddEditIngredientActivity.class);
-            startActivity(intent);
-        });
+        // Explicit Intent with no extras = "add new ingredient" mode
+        fabAddIngredient.setOnClickListener(v ->
+                startActivity(new Intent(this, AddEditIngredientActivity.class)));
 
-        btnQuickSuggest.setOnClickListener(v -> {
-            Intent intent = new Intent(MainActivity.this, SuggestedRecipesActivity.class);
-            startActivity(intent);
-        });
+        btnQuickSuggest.setOnClickListener(v ->
+                startActivity(new Intent(this, SuggestedRecipesActivity.class)));
 
         btnLoadDemoPantry.setOnClickListener(v -> {
-            dbHelper.seedSamplePantryItems();
+            int count = dbHelper.loadSamplePantry();
             refreshPantryList();
-            Toast.makeText(this, "Loaded 12 sample pantry ingredients!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getResources().getQuantityString(
+                    R.plurals.sample_pantry_loaded, count, count), Toast.LENGTH_SHORT).show();
         });
 
-        bottomNav.setSelectedItemId(R.id.nav_pantry);
-        bottomNav.setOnItemSelectedListener(item -> {
-            int itemId = item.getItemId();
-            if (itemId == R.id.nav_pantry) {
-                return true;
-            } else if (itemId == R.id.nav_recipes) {
-                startActivity(new Intent(MainActivity.this, SuggestedRecipesActivity.class));
-                return true;
-            } else if (itemId == R.id.nav_settings) {
-                startActivity(new Intent(MainActivity.this, SettingsActivity.class));
-                return true;
-            }
-            return false;
-        });
+        NavigationHelper.setUpBottomNavigation(this, bottomNav, R.id.nav_pantry);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        BottomNavigationView bottomNav = findViewById(R.id.bottomNavigation);
         bottomNav.setSelectedItemId(R.id.nav_pantry);
         refreshPantryList();
     }
 
+    /** Reads the pantry from SQLite and updates the list, summary and empty state. */
     private void refreshPantryList() {
         List<PantryItem> items = dbHelper.getAllPantryItems();
         boolean alertsEnabled = prefsManager.isExpiryAlertsEnabled();
         int warningDays = prefsManager.getExpiryThresholdDays();
 
         pantryAdapter.updateData(items, alertsEnabled, warningDays);
+        tvPantrySummary.setText(getResources().getQuantityString(
+                R.plurals.pantry_summary, items.size(), items.size()));
 
-        if (items.isEmpty()) {
-            rvPantryItems.setVisibility(View.GONE);
-            layoutEmptyPantry.setVisibility(View.VISIBLE);
-            tvPantrySummary.setText("0 Ingredients in Pantry");
-            tvExpiryAlertBanner.setVisibility(View.GONE);
+        boolean isEmpty = items.isEmpty();
+        rvPantryItems.setVisibility(isEmpty ? View.GONE : View.VISIBLE);
+        layoutEmptyPantry.setVisibility(isEmpty ? View.VISIBLE : View.GONE);
+
+        int expiringCount = 0;
+        int expiredCount = 0;
+        for (PantryItem item : items) {
+            if (item.isExpired()) {
+                expiredCount++;
+            } else if (item.isExpiringSoon(warningDays)) {
+                expiringCount++;
+            }
+        }
+        if (alertsEnabled && (expiredCount > 0 || expiringCount > 0)) {
+            tvExpiryAlertBanner.setVisibility(View.VISIBLE);
+            tvExpiryAlertBanner.setText(getString(
+                    R.string.expiry_alert_banner, expiringCount, warningDays, expiredCount));
         } else {
-            rvPantryItems.setVisibility(View.VISIBLE);
-            layoutEmptyPantry.setVisibility(View.GONE);
-            tvPantrySummary.setText(String.format(
-                    Locale.US, "%d Ingredient%s in Pantry",
-                    items.size(), items.size() == 1 ? "" : "s"
-            ));
-
-            int expiringCount = 0;
-            int expiredCount = 0;
-            for (PantryItem item : items) {
-                if (item.isExpired()) {
-                    expiredCount++;
-                } else if (item.isExpiringSoon(warningDays)) {
-                    expiringCount++;
-                }
-            }
-
-            if (alertsEnabled && (expiredCount > 0 || expiringCount > 0)) {
-                tvExpiryAlertBanner.setVisibility(View.VISIBLE);
-                tvExpiryAlertBanner.setText(String.format(
-                        Locale.US,
-                        "Expiry Alert: %d expiring within %d days, %d expired.",
-                        expiringCount, warningDays, expiredCount
-                ));
-            } else {
-                tvExpiryAlertBanner.setVisibility(View.GONE);
-            }
+            tvExpiryAlertBanner.setVisibility(View.GONE);
         }
     }
 
     @Override
     public void onEditItem(PantryItem item) {
-        Intent intent = new Intent(MainActivity.this, AddEditIngredientActivity.class);
+        // Pass the database id so the edit screen loads the current record itself
+        Intent intent = new Intent(this, AddEditIngredientActivity.class);
         intent.putExtra(AddEditIngredientActivity.EXTRA_PANTRY_ITEM_ID, item.getId());
         startActivity(intent);
     }
@@ -157,14 +135,15 @@ public class MainActivity extends AppCompatActivity implements PantryAdapter.OnP
     @Override
     public void onDeleteItem(PantryItem item) {
         new AlertDialog.Builder(this)
-                .setTitle("Delete Ingredient")
-                .setMessage("Remove '" + item.getName() + "' (" + item.getFormattedQuantity() + ") from your pantry?")
-                .setPositiveButton("Delete", (dialog, which) -> {
+                .setTitle(R.string.delete_item_title)
+                .setMessage(getString(R.string.delete_item_message, item.getName(), item.getFormattedQuantity()))
+                .setPositiveButton(R.string.btn_delete, (dialog, which) -> {
                     dbHelper.deletePantryItem(item.getId());
                     refreshPantryList();
-                    Toast.makeText(this, "Deleted " + item.getName(), Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, getString(R.string.item_deleted, item.getName()),
+                            Toast.LENGTH_SHORT).show();
                 })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(R.string.btn_cancel, null)
                 .show();
     }
 }

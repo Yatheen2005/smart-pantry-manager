@@ -1,5 +1,6 @@
 package za.ac.richfield.smartpantry.adapter;
 
+import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -7,6 +8,7 @@ import android.widget.Button;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
@@ -16,12 +18,15 @@ import za.ac.richfield.smartpantry.R;
 import za.ac.richfield.smartpantry.model.PantryItem;
 
 /**
- * Custom RecyclerView Adapter binding SQLite PantryItem records to item_pantry.xml cards.
+ * Custom RecyclerView Adapter that binds PantryItem rows from the SQLite pantry_items table
+ * to item_pantry.xml cards. Edit/Delete taps are passed back to the Activity via a listener,
+ * so the adapter only displays data and never touches the database itself.
  */
 public class PantryAdapter extends RecyclerView.Adapter<PantryAdapter.PantryViewHolder> {
 
     public interface OnPantryItemActionListener {
         void onEditItem(PantryItem item);
+
         void onDeleteItem(PantryItem item);
     }
 
@@ -34,6 +39,7 @@ public class PantryAdapter extends RecyclerView.Adapter<PantryAdapter.PantryView
         this.listener = listener;
     }
 
+    /** Replaces the displayed list (called after every database change). */
     public void updateData(List<PantryItem> newItems, boolean showExpiryAlerts, int warningDays) {
         this.items = (newItems != null) ? newItems : new ArrayList<>();
         this.showExpiryAlerts = showExpiryAlerts;
@@ -52,37 +58,50 @@ public class PantryAdapter extends RecyclerView.Adapter<PantryAdapter.PantryView
     @Override
     public void onBindViewHolder(@NonNull PantryViewHolder holder, int position) {
         final PantryItem item = items.get(position);
+        Context context = holder.itemView.getContext();
+
         holder.tvIngredientName.setText(item.getName());
-        holder.tvQuantityUnit.setText("Available: " + item.getFormattedQuantity());
+        holder.tvQuantityUnit.setText(context.getString(R.string.available_quantity, item.getFormattedQuantity()));
+        bindExpiryBadge(holder.tvExpiryBadge, item, context);
 
-        if (item.hasExpiryDate()) {
-            holder.tvExpiryBadge.setVisibility(View.VISIBLE);
-            long days = item.getDaysUntilExpiry();
-            if (days < 0) {
-                holder.tvExpiryBadge.setText("EXPIRED (" + item.getExpiryDate() + ")");
-                holder.tvExpiryBadge.setBackgroundResource(R.drawable.bg_badge_red);
-            } else if (showExpiryAlerts && days <= expiryWarningDays) {
-                holder.tvExpiryBadge.setText("Expiring in " + days + "d (" + item.getExpiryDate() + ")");
-                holder.tvExpiryBadge.setBackgroundResource(R.drawable.bg_badge_amber);
-            } else {
-                holder.tvExpiryBadge.setText("Expires: " + item.getExpiryDate());
-                holder.tvExpiryBadge.setBackgroundResource(R.drawable.bg_badge_green);
-            }
-        } else {
-            holder.tvExpiryBadge.setVisibility(View.GONE);
+        // Screen readers announce "Edit Butter" rather than just "Edit"
+        holder.btnEditItem.setContentDescription(context.getString(R.string.cd_edit_item, item.getName()));
+        holder.btnDeleteItem.setContentDescription(context.getString(R.string.cd_delete_item, item.getName()));
+
+        holder.btnEditItem.setOnClickListener(v -> listener.onEditItem(item));
+        holder.itemView.setOnClickListener(v -> listener.onEditItem(item));
+        holder.btnDeleteItem.setOnClickListener(v -> listener.onDeleteItem(item));
+    }
+
+    private void bindExpiryBadge(TextView badge, PantryItem item, Context context) {
+        if (!item.hasExpiryDate()) {
+            badge.setVisibility(View.GONE);
+            return;
         }
+        badge.setVisibility(View.VISIBLE);
+        long days = item.getDaysUntilExpiry();
+        String date = item.getExpiryDate();
 
-        holder.btnEditItem.setOnClickListener(v -> {
-            if (listener != null) {
-                listener.onEditItem(item);
-            }
-        });
+        if (days < 0) {
+            setBadge(badge, context.getString(R.string.badge_expired, date),
+                    R.drawable.bg_badge_red, R.color.danger_red);
+        } else if (showExpiryAlerts && days == 0) {
+            setBadge(badge, context.getString(R.string.badge_expires_today, date),
+                    R.drawable.bg_badge_amber, R.color.accent_amber_text);
+        } else if (showExpiryAlerts && days <= expiryWarningDays) {
+            setBadge(badge, context.getResources().getQuantityString(
+                            R.plurals.badge_expiring_soon, (int) days, (int) days, date),
+                    R.drawable.bg_badge_amber, R.color.accent_amber_text);
+        } else {
+            setBadge(badge, context.getString(R.string.badge_expires_on, date),
+                    R.drawable.bg_badge_green, R.color.primary_green_dark);
+        }
+    }
 
-        holder.btnDeleteItem.setOnClickListener(v -> {
-            if (listener != null) {
-                listener.onDeleteItem(item);
-            }
-        });
+    private static void setBadge(TextView badge, String text, int backgroundRes, int textColorRes) {
+        badge.setText(text);
+        badge.setBackgroundResource(backgroundRes);
+        badge.setTextColor(ContextCompat.getColor(badge.getContext(), textColorRes));
     }
 
     @Override

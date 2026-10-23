@@ -8,22 +8,22 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-
-import java.util.List;
-import java.util.Locale;
+import androidx.core.content.ContextCompat;
 
 import za.ac.richfield.smartpantry.R;
 import za.ac.richfield.smartpantry.database.PantryDatabaseHelper;
-import za.ac.richfield.smartpantry.model.PantryItem;
+import za.ac.richfield.smartpantry.model.IngredientCheck;
 import za.ac.richfield.smartpantry.model.Recipe;
 import za.ac.richfield.smartpantry.model.RecipeMatchResult;
 import za.ac.richfield.smartpantry.util.StrictRecipeMatcher;
 import za.ac.richfield.smartpantry.util.UserPreferencesManager;
 
 /**
- * Screen 4: Recipe Detail Activity.
- * Displays the selected recipe's full required ingredient list, real-time pantry sufficiency
- * verification, preparation method, and a button to deduct cooked ingredients from the pantry.
+ * Screen 4: Recipe Detail.
+ *
+ * Receives a recipe id through the Intent (EXTRA_RECIPE_ID), loads the recipe from SQLite and
+ * shows every required ingredient with a live pantry check (✓ / ✗), the method, and - only
+ * when the recipe is a strict match - a button that deducts the used ingredients.
  */
 public class RecipeDetailActivity extends AppCompatActivity {
 
@@ -45,6 +45,10 @@ public class RecipeDetailActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_recipe_detail);
         setTitle(R.string.title_recipe_detail);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
+        NavigationHelper.applyBottomSystemBarPadding(findViewById(R.id.recipeDetailRoot));
 
         dbHelper = PantryDatabaseHelper.getInstance(this);
         prefsManager = new UserPreferencesManager(this);
@@ -56,83 +60,82 @@ public class RecipeDetailActivity extends AppCompatActivity {
         tvDetailInstructions = findViewById(R.id.tvDetailInstructions);
         btnCookAndDeduct = findViewById(R.id.btnCookAndDeduct);
 
-        long recipeId = getIntent() != null ? getIntent().getLongExtra(EXTRA_RECIPE_ID, -1) : -1;
-        if (recipeId == -1) {
-            Toast.makeText(this, "Invalid recipe selected.", Toast.LENGTH_SHORT).show();
+        long recipeId = getIntent().getLongExtra(EXTRA_RECIPE_ID, -1);
+        currentRecipe = recipeId == -1 ? null : dbHelper.getRecipeById(recipeId);
+        if (currentRecipe == null) {
+            Toast.makeText(this, R.string.recipe_not_found, Toast.LENGTH_SHORT).show();
             finish();
             return;
         }
 
-        loadRecipeDetails(recipeId);
-
-        btnCookAndDeduct.setOnClickListener(v -> {
-            if (currentRecipe == null) {
-                return;
-            }
-            new AlertDialog.Builder(this)
-                    .setTitle("Cook " + currentRecipe.getTitle())
-                    .setMessage("Deduct the required quantities for this recipe from your pantry?")
-                    .setPositiveButton("Cook & Deduct", (dialog, which) -> {
-                        dbHelper.consumeRecipeIngredients(currentRecipe);
-                        Toast.makeText(this,
-                                "Enjoy your meal! Pantry quantities updated.",
-                                Toast.LENGTH_LONG).show();
-                        finish();
-                    })
-                    .setNegativeButton("Cancel", null)
-                    .show();
-        });
+        btnCookAndDeduct.setOnClickListener(v -> confirmCook());
     }
 
-    private void loadRecipeDetails(long recipeId) {
-        currentRecipe = dbHelper.getRecipeById(recipeId);
-        if (currentRecipe == null) {
-            Toast.makeText(this, "Recipe not found.", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (currentRecipe != null) {
+            showRecipe();
         }
+    }
 
-        List<PantryItem> pantryItems = dbHelper.getAllPantryItems();
-        RecipeMatchResult matchResult = StrictRecipeMatcher.evaluateRecipe(
-                currentRecipe, pantryItems, prefsManager.isExcludeExpiredFromMatching()
-        );
+    @Override
+    public boolean onSupportNavigateUp() {
+        finish();
+        return true;
+    }
+
+    /** Re-checks the recipe against the current pantry and fills in every view. */
+    private void showRecipe() {
+        RecipeMatchResult match = StrictRecipeMatcher.evaluateRecipe(
+                currentRecipe, dbHelper.getAllPantryItems(), prefsManager.isExcludeExpiredFromMatching());
 
         tvDetailTitle.setText(currentRecipe.getTitle());
-        tvDetailMeta.setText(String.format(
-                Locale.US,
-                "%s • Prep Time: %d mins • Serves %d",
-                currentRecipe.getCategory(),
-                currentRecipe.getPrepTimeMinutes(),
-                currentRecipe.getServings()
-        ));
+        tvDetailMeta.setText(getString(R.string.detail_meta, currentRecipe.getCategory(),
+                currentRecipe.getPrepTimeMinutes(), currentRecipe.getServings()));
 
-        if (matchResult.isStrictMatch()) {
-            tvDetailMatchBanner.setText(
-                    "Strict Match Verified: Every required ingredient is in your pantry in sufficient quantity!"
-            );
+        if (match.isStrictMatch()) {
+            tvDetailMatchBanner.setText(R.string.detail_strict_match);
             tvDetailMatchBanner.setBackgroundResource(R.drawable.bg_badge_green);
+            tvDetailMatchBanner.setTextColor(ContextCompat.getColor(this, R.color.primary_green_dark));
             btnCookAndDeduct.setVisibility(View.VISIBLE);
         } else {
-            tvDetailMatchBanner.setText(String.format(
-                    Locale.US,
-                    "Missing or Insufficient: %d of %d required ingredients.",
-                    matchResult.getMissingOrInsufficientCount(),
-                    matchResult.getTotalIngredientsCount()
-            ));
+            tvDetailMatchBanner.setText(getString(R.string.detail_not_available,
+                    match.getMissingOrInsufficientCount(), match.getTotalIngredientsCount()));
             tvDetailMatchBanner.setBackgroundResource(R.drawable.bg_badge_amber);
+            tvDetailMatchBanner.setTextColor(ContextCompat.getColor(this, R.color.accent_amber_text));
             btnCookAndDeduct.setVisibility(View.GONE);
         }
 
-        StringBuilder ingBuilder = new StringBuilder();
-        for (String matched : matchResult.getMatchedBreakdown()) {
-            ingBuilder.append("✓ ").append(matched).append("
-");
+        // One line per ingredient, in the recipe's own order
+        StringBuilder lines = new StringBuilder();
+        for (IngredientCheck check : match.getChecks()) {
+            if (lines.length() > 0) {
+                lines.append('\n');
+            }
+            int format = check.isSatisfied() ? R.string.check_available : R.string.check_unavailable;
+            lines.append(getString(format, check.describe()));
         }
-        for (String missing : matchResult.getMissingBreakdown()) {
-            ingBuilder.append("✗ ").append(missing).append("
-");
-        }
-        tvDetailIngredientsList.setText(ingBuilder.toString().trim());
+        tvDetailIngredientsList.setText(lines.toString());
         tvDetailInstructions.setText(currentRecipe.getInstructions());
+    }
+
+    private void confirmCook() {
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.cook_dialog_title, currentRecipe.getTitle()))
+                .setMessage(R.string.cook_dialog_message)
+                .setPositiveButton(R.string.btn_cook_confirm, (dialog, which) -> {
+                    boolean cooked = dbHelper.consumeRecipeIngredients(
+                            currentRecipe, prefsManager.isExcludeExpiredFromMatching());
+                    if (cooked) {
+                        Toast.makeText(this, R.string.cooked_toast, Toast.LENGTH_LONG).show();
+                        finish();
+                    } else {
+                        Toast.makeText(this, R.string.cook_failed, Toast.LENGTH_LONG).show();
+                        showRecipe();
+                    }
+                })
+                .setNegativeButton(R.string.btn_cancel, null)
+                .show();
     }
 }
