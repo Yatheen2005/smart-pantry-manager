@@ -1,77 +1,73 @@
 package za.ac.richfield.smartpantry.model;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * Holds the detailed evaluation result of comparing a single Recipe against the user's pantry.
- * Enforces the assignment's strict-matching rule: a recipe is a strict match if and only if
- * totalIngredientsCount > 0 and missingOrInsufficientCount == 0.
+ * The result of comparing a single Recipe against the user's pantry: one IngredientCheck per
+ * required ingredient, in the recipe's own order.
+ *
+ * Strict-matching rule (Section 2.3): a recipe is a strict match if and only if it has at least
+ * one required ingredient and EVERY ingredient check is satisfied.
  */
-public class RecipeMatchResult implements Serializable {
+public class RecipeMatchResult {
 
     private final Recipe recipe;
-    private final int totalIngredientsCount;
-    private final int matchedIngredientsCount;
+    private final List<IngredientCheck> checks;
     private final int missingOrInsufficientCount;
-    private final List<String> matchedBreakdown;
-    private final List<String> missingBreakdown;
 
-    public RecipeMatchResult(Recipe recipe,
-                             List<String> matchedBreakdown,
-                             List<String> missingBreakdown) {
+    public RecipeMatchResult(Recipe recipe, List<IngredientCheck> checks) {
         this.recipe = recipe;
-        this.matchedBreakdown = new ArrayList<>(matchedBreakdown);
-        this.missingBreakdown = new ArrayList<>(missingBreakdown);
-        this.matchedIngredientsCount = this.matchedBreakdown.size();
-        this.missingOrInsufficientCount = this.missingBreakdown.size();
-        this.totalIngredientsCount = this.matchedIngredientsCount + this.missingIngredientsCount();
-    }
-
-    private int missingIngredientsCount() {
-        return this.missingOrInsufficientCount;
+        this.checks = new ArrayList<>(checks);
+        int unsatisfied = 0;
+        for (IngredientCheck check : this.checks) {
+            if (!check.isSatisfied()) {
+                unsatisfied++;
+            }
+        }
+        this.missingOrInsufficientCount = unsatisfied;
     }
 
     public Recipe getRecipe() {
         return recipe;
     }
 
-    /**
-     * Strict-matching predicate (Section 2.3):
-     * Returns true ONLY when every single required ingredient is present in the pantry
-     * in at least the required quantity.
-     */
+    /** True ONLY when every required ingredient is present in at least the required quantity. */
     public boolean isStrictMatch() {
-        return totalIngredientsCount > 0 && missingOrInsufficientCount == 0;
+        return !checks.isEmpty() && missingOrInsufficientCount == 0;
     }
 
-    /**
-     * Optional stretch predicate (Section 2.3 & Section 8):
-     * Returns true when a recipe is missing (or short on) exactly 1 required ingredient.
-     */
+    /** Optional stretch goal: exactly one ingredient is missing or short. */
     public boolean isAlmostThere() {
-        return totalIngredientsCount > 0 && missingOrInsufficientCount == 1;
+        return !checks.isEmpty() && missingOrInsufficientCount == 1;
     }
 
     public int getTotalIngredientsCount() {
-        return totalIngredientsCount;
+        return checks.size();
     }
 
     public int getMatchedIngredientsCount() {
-        return matchedIngredientsCount;
+        return checks.size() - missingOrInsufficientCount;
     }
 
     public int getMissingOrInsufficientCount() {
         return missingOrInsufficientCount;
     }
 
-    public List<String> getMatchedBreakdown() {
-        return Collections.unmodifiableList(matchedBreakdown);
+    /** Every ingredient check, in recipe order. */
+    public List<IngredientCheck> getChecks() {
+        return Collections.unmodifiableList(checks);
     }
 
-    public List<String> getMissingBreakdown() {
-        return Collections.unmodifiableList(missingBreakdown);
+    /** Only the checks that failed (missing, insufficient or incompatible unit). */
+    public List<IngredientCheck> getUnsatisfiedChecks() {
+        List<IngredientCheck> unsatisfied = new ArrayList<>();
+        for (IngredientCheck check : checks) {
+            if (!check.isSatisfied()) {
+                unsatisfied.add(check);
+            }
+        }
+        return unsatisfied;
     }
 }

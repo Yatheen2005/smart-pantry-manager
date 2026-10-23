@@ -6,13 +6,20 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Handles unit canonicalization, dimensional compatibility checks, and quantity conversions
- * across Mass (mg, g, kg, oz, lb), Volume (ml, l, tsp, tbsp, fl oz, cup), and Count (pcs, cloves,
- * slices, tins/cans) units.
+ * Handles unit canonicalization, compatibility checks and quantity conversions.
  *
- * Also supports practical kitchen bridging between mass (g) and volume (ml/tsp/tbsp/cup)
- * at standard water/kitchen density (1 ml ~= 1 g) so that common pantry entries (e.g. 500 g flour
- * vs 1 cup flour, or 250 g butter vs 2 tbsp butter) match seamlessly without false rejection.
+ * Supported dimensions:
+ * - MASS   (base unit g):  mg, g, kg, oz, lb
+ * - VOLUME (base unit ml): ml, l, tsp, tbsp, cup, fl oz
+ * - COUNT  (no base unit): pcs, clove, slice, tin
+ *
+ * Deliberate strictness (Section 2.3 - a recipe must never be suggested unless the user
+ * genuinely has enough):
+ * - Mass and volume are NOT converted into each other. Density differs per ingredient
+ *   (1 cup of flour is roughly 125 g, 1 cup of milk roughly 250 g), so a generic bridge would
+ *   over-estimate some ingredients and suggest recipes the user cannot actually cook.
+ * - Count units only match the same count unit. "6 pcs garlic" (bulbs?) is not assumed to be
+ *   "6 cloves", and "1 slice onion" is not assumed to be a whole onion.
  */
 public final class UnitConverter {
 
@@ -29,6 +36,7 @@ public final class UnitConverter {
     private static final Map<String, Dimension> UNIT_DIMENSIONS;
     private static final Map<String, Double> TO_BASE_MULTIPLIER;
 
+    /** Units offered in the Add/Edit Ingredient spinner (all canonical codes). */
     public static final String[] SUPPORTED_DISPLAY_UNITS = {
         "g", "kg", "ml", "l", "tsp", "tbsp", "cup", "pcs", "clove", "slice", "tin", "oz", "lb"
     };
@@ -126,19 +134,13 @@ public final class UnitConverter {
         multipliers.put("oz", 28.3495);
         multipliers.put("lb", 453.592);
 
-        // Base unit for VOLUME is milliliters (ml)
+        // Base unit for VOLUME is milliliters (ml); metric kitchen measures
         multipliers.put("ml", 1.0);
         multipliers.put("l", 1000.0);
         multipliers.put("tsp", 5.0);
         multipliers.put("tbsp", 15.0);
         multipliers.put("cup", 250.0);
         multipliers.put("fl oz", 29.5735);
-
-        // Base unit for COUNT is 1 discrete item
-        multipliers.put("pcs", 1.0);
-        multipliers.put("clove", 1.0);
-        multipliers.put("slice", 1.0);
-        multipliers.put("tin", 1.0);
         TO_BASE_MULTIPLIER = Collections.unmodifiableMap(multipliers);
     }
 
@@ -148,93 +150,66 @@ public final class UnitConverter {
 
     /**
      * Normalizes a raw unit string (e.g. "Kilograms", "Tablespoons", "pieces") into its
-     * canonical unit code ("kg", "tbsp", "pcs").
+     * canonical unit code ("kg", "tbsp", "pcs"). Unknown units are returned lower-cased.
      */
     public static String normalizeUnit(String rawUnit) {
         if (rawUnit == null) {
             return "";
         }
         String cleaned = rawUnit.toLowerCase(Locale.US).trim();
-        return UNIT_ALIASES.getOrDefault(cleaned, cleaned);
+        String canonical = UNIT_ALIASES.get(cleaned);
+        return canonical != null ? canonical : cleaned;
     }
 
     public static boolean isValidUnit(String rawUnit) {
-        String norm = normalizeUnit(rawUnit);
-        return UNIT_DIMENSIONS.containsKey(norm);
+        return UNIT_DIMENSIONS.containsKey(normalizeUnit(rawUnit));
     }
 
     public static Dimension getDimension(String rawUnit) {
-        String norm = normalizeUnit(rawUnit);
-        return UNIT_DIMENSIONS.getOrDefault(norm, Dimension.UNKNOWN);
+        Dimension dimension = UNIT_DIMENSIONS.get(normalizeUnit(rawUnit));
+        return dimension != null ? dimension : Dimension.UNKNOWN;
     }
 
     /**
-     * Checks if two units can be converted into one another.
-     * Units within the same dimension (e.g. g <-> kg, ml <-> l <-> cup <-> tbsp) are always compatible.
-     * Mass and Volume are also bridgeable using standard culinary density (1 g ~= 1 ml) when needed.
-     * Count units (pcs, clove, slice, tin) are compatible with other count units, except "tin"
-     * which requires matching "tin" (or 1 tin ~= 400 g / 400 ml culinary bridge).
+     * Two units are compatible when they are the same unit, or when both are MASS units
+     * or both are VOLUME units. Count units are only compatible with themselves.
      */
     public static boolean areUnitsCompatible(String fromUnit, String toUnit) {
         String normFrom = normalizeUnit(fromUnit);
         String normTo = normalizeUnit(toUnit);
-        if (normFrom.isEmpty() || normTo.isEmpty()) {
+        if (!isValidUnit(normFrom) || !isValidUnit(normTo)) {
             return false;
         }
         if (normFrom.equals(normTo)) {
             return true;
         }
-        Dimension dimFrom = getDimension(normFrom);
-        Dimension dimTo = getDimension(normTo);
-        if (dimFrom == Dimension.UNKNOWN || dimTo == Dimension.UNKNOWN) {
-            return false;
-        }
-        if (dimFrom == dimTo) {
-            if (dimFrom == Dimension.COUNT) {
-                // Keep "tin" distinct from "clove"/"slice", though "pcs" matches generic count
-                if ((normFrom.equals("tin") && !normTo.equals("tin"))
-                        || (!normFrom.equals("tin") && normTo.equals("tin"))) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        // Allow practical kitchen bridging between MASS and VOLUME (1 g ~= 1 ml)
-        if ((dimFrom == Dimension.MASS && dimTo == Dimension.VOLUME)
-                || (dimFrom == Dimension.VOLUME && dimTo == Dimension.MASS)) {
-            return true;
-        }
-        return false;
+        Dimension dimension = getDimension(normFrom);
+        return dimension == getDimension(normTo)
+                && (dimension == Dimension.MASS || dimension == Dimension.VOLUME);
     }
 
     /**
      * Converts a quantity from one unit to another compatible unit.
      *
-     * @throws IllegalArgumentException if units are incompatible.
+     * @throws IllegalArgumentException if the units are not compatible.
      */
     public static double convert(double quantity, String fromUnit, String toUnit) {
-        String normFrom = normalizeUnit(fromUnit);
-        String normTo = normalizeUnit(toUnit);
-
-        if (normFrom.equals(normTo)) {
-            return quantity;
-        }
-        if (!areUnitsCompatible(normFrom, normTo)) {
+        if (!areUnitsCompatible(fromUnit, toUnit)) {
             throw new IllegalArgumentException(
                     "Cannot convert between incompatible units: '" + fromUnit + "' and '" + toUnit + "'");
         }
-
-        double fromMultiplier = TO_BASE_MULTIPLIER.get(normFrom);
-        double toMultiplier = TO_BASE_MULTIPLIER.get(normTo);
-
-        // Both MASS (base g) and VOLUME (base ml) use a 1:1 base equivalence when bridging
-        double baseQuantity = quantity * fromMultiplier;
-        return baseQuantity / toMultiplier;
+        String normFrom = normalizeUnit(fromUnit);
+        String normTo = normalizeUnit(toUnit);
+        if (normFrom.equals(normTo)) {
+            return quantity;
+        }
+        // Both units share a base unit (g or ml): convert to base, then to the target unit
+        return quantity * TO_BASE_MULTIPLIER.get(normFrom) / TO_BASE_MULTIPLIER.get(normTo);
     }
 
     /**
-     * Evaluates whether the user's available pantry quantity (in pantryUnit) satisfies
-     * at least the recipe's requiredQuantity (in requiredUnit).
+     * Returns true when pantryQty (in pantryUnit) is at least requiredQty (in requiredUnit).
+     * Incompatible units are never treated as sufficient.
      */
     public static boolean hasSufficientQuantity(double pantryQty, String pantryUnit,
                                                 double requiredQty, String requiredUnit) {
