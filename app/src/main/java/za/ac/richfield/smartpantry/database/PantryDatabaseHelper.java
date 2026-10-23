@@ -3,25 +3,34 @@ package za.ac.richfield.smartpantry.database;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
+import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
+import androidx.annotation.VisibleForTesting;
+
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 
 import za.ac.richfield.smartpantry.model.PantryItem;
 import za.ac.richfield.smartpantry.model.Recipe;
 import za.ac.richfield.smartpantry.model.RecipeIngredient;
 import za.ac.richfield.smartpantry.util.IngredientNormalizer;
+import za.ac.richfield.smartpantry.util.StrictRecipeMatcher;
 import za.ac.richfield.smartpantry.util.UnitConverter;
 
 /**
  * Local SQLite persistence layer built with Android's SQLiteOpenHelper (Section 3.2).
  *
- * Manages three normalized relational tables:
- * 1. pantry_items       - User's current pantry inventory (full Create, Read, Update, Delete)
- * 2. recipes            - Pre-loaded collection of 18 recipes seeded on first database creation
- * 3. recipe_ingredients - Required ingredients per recipe (1-to-many foreign key relationship)
+ * Tables:
+ * 1. pantry_items       - the user's pantry (full Create, Read, Update, Delete)
+ * 2. recipes            - 18 recipes seeded once, when the database file is first created
+ * 3. recipe_ingredients - required ingredients per recipe (one-to-many, foreign key to recipes)
+ *
+ * The database is a file in the app's private storage, so data survives the app being closed,
+ * swiped away or the device restarting.
  */
 public class PantryDatabaseHelper extends SQLiteOpenHelper {
 
@@ -91,15 +100,24 @@ public class PantryDatabaseHelper extends SQLiteOpenHelper {
 
     private static PantryDatabaseHelper instance;
 
+    /**
+     * Single shared helper for the whole app, so every Activity uses the same open connection.
+     * The application context is used to avoid leaking an Activity.
+     */
     public static synchronized PantryDatabaseHelper getInstance(Context context) {
         if (instance == null) {
-            instance = new PantryDatabaseHelper(context.getApplicationContext());
+            instance = new PantryDatabaseHelper(context.getApplicationContext(), DATABASE_NAME);
         }
         return instance;
     }
 
-    public PantryDatabaseHelper(Context context) {
-        super(context, DATABASE_NAME, null, DATABASE_VERSION);
+    /**
+     * @param databaseName file name of the database; tests pass their own name so they never
+     *                     touch the user's real pantry.
+     */
+    @VisibleForTesting
+    public PantryDatabaseHelper(Context context, String databaseName) {
+        super(context, databaseName, null, DATABASE_VERSION);
     }
 
     @Override
@@ -116,16 +134,23 @@ public class PantryDatabaseHelper extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX idx_pantry_norm_name ON " + TABLE_PANTRY + "(" + COL_PANTRY_NORM_NAME + ");");
         db.execSQL("CREATE INDEX idx_ri_recipe_id ON " + TABLE_RECIPE_INGREDIENTS + "(" + COL_RI_RECIPE_ID + ");");
 
-        // Seed the 18 pre-loaded recipes on first database creation
+        // Seed the pre-loaded recipes once, when the database file is first created
         RecipeSeeder.seedRecipes(db);
     }
 
+    /**
+     * Called when DATABASE_VERSION is increased. Recipe tables are app-owned reference data, so
+     * they are rebuilt; the user's pantry_items table is kept so no user data is lost.
+     */
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         db.execSQL("DROP TABLE IF EXISTS " + TABLE_RECIPE_INGREDIENTS);
         db.execSQL("DROP TABLE IF EXISTS " + TABLE_RECIPES);
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_PANTRY);
-        onCreate(db);
+        db.execSQL(SQL_CREATE_RECIPES_TABLE);
+        db.execSQL(SQL_CREATE_RECIPE_INGREDIENTS_TABLE);
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_ri_recipe_id ON "
+                + TABLE_RECIPE_INGREDIENTS + "(" + COL_RI_RECIPE_ID + ");");
+        RecipeSeeder.seedRecipes(db);
     }
 
     // =========================================================================
@@ -133,252 +158,188 @@ public class PantryDatabaseHelper extends SQLiteOpenHelper {
     // =========================================================================
 
     /**
-     * CREATE: Inserts a new PantryItem into the database.
-     * Automatically populates normalized_name and canonical unit before saving.
+     * CREATE: inserts a new pantry item. The canonical name and unit are stored alongside the
+     * name the user typed.
+     *
+     * @return the new row id, or -1 if the insert failed
      */
     public long insertPantryItem(PantryItem item) {
-        SQLiteDatabase db = this.getWritableDatabase();
-        ContentValues values = new ContentValues();
-        String normName = IngredientNormalizer.normalize(item.getName());
-        String normUnit = UnitConverter.normalizeUnit(item.getUnit());
-
-        values.put(COL_PANTRY_NAME, item.getName().trim());
-        values.put(COL_PANTRY_NORM_NAME, normName);
-        values.put(COL_PANTRY_QUANTITY, item.getQuantity());
-        values.put(COL_PANTRY_UNIT, normUnit);
-        values.put(COL_PANTRY_EXPIRY, item.hasExpiryDate() ? item.getExpiryDate().trim() : null);
-        values.put(COL_PANTRY_UPDATED, System.currentTimeMillis());
-
-        long id = db.insert(TABLE_PANTRY, null, values);
+        ContentValues values = toContentValues(item);
+        long id = getWritableDatabase().insert(TABLE_PANTRY, null, values);
         item.setId(id);
-        item.setNormalizedName(normName);
-        item.setUnit(normUnit);
+        item.setNormalizedName(values.getAsString(COL_PANTRY_NORM_NAME));
+        item.setUnit(values.getAsString(COL_PANTRY_UNIT));
         return id;
     }
 
     /**
-     * READ (All): Retrieves all pantry items ordered alphabetically by ingredient name.
+     * READ (all): every pantry item, ordered alphabetically by name.
      */
     public List<PantryItem> getAllPantryItems() {
-        List<PantryItem> items = new ArrayList<>();
-        SQLiteDatabase db = this.getReadableDatabase();
-        Cursor cursor = db.query(
-                TABLE_PANTRY,
-                null,
-                null,
-                null,
-                null,
-                null,
-                COL_PANTRY_NAME + " COLLATE NOCASE ASC"
-        );
-
-        if (cursor != null) {
-            try {
-                while (cursor.moveToNext()) {
-                    items.add(mapCursorToPantryItem(cursor));
-                }
-            } finally {
-                cursor.close();
-            }
-        }
-        return items;
+        return queryPantry(null, null);
     }
 
     /**
-     * READ (Single by ID): Retrieves a single PantryItem by primary key _id.
+     * READ (one): a single pantry item by id, or null if it does not exist.
      */
     public PantryItem getPantryItemById(long id) {
-        SQLiteDatabase db = this.getReadableDatabase();
-        Cursor cursor = db.query(
-                TABLE_PANTRY,
-                null,
-                COL_PANTRY_ID + " = ?",
-                new String[]{String.valueOf(id)},
-                null,
-                null,
-                null
-        );
-
-        if (cursor != null) {
-            try {
-                if (cursor.moveToFirst()) {
-                    return mapCursorToPantryItem(cursor);
-                }
-            } finally {
-                cursor.close();
-            }
-        }
-        return null;
+        List<PantryItem> result = queryPantry(COL_PANTRY_ID + " = ?", new String[]{String.valueOf(id)});
+        return result.isEmpty() ? null : result.get(0);
     }
 
     /**
-     * UPDATE: Updates an existing PantryItem record by primary key _id.
+     * READ (duplicates): items whose canonical name equals the canonical form of rawName,
+     * e.g. "Tomatoes" finds an existing "Fresh Tomato" row.
+     */
+    public List<PantryItem> findPantryItemsByName(String rawName) {
+        String normalized = IngredientNormalizer.normalize(rawName);
+        return queryPantry(COL_PANTRY_NORM_NAME + " = ?", new String[]{normalized});
+    }
+
+    /**
+     * UPDATE: updates an existing pantry item by id.
      *
-     * @return Number of rows affected (1 if successful, 0 otherwise).
+     * @return number of rows changed (1 if successful, 0 if the id does not exist)
      */
     public int updatePantryItem(PantryItem item) {
-        SQLiteDatabase db = this.getWritableDatabase();
-        ContentValues values = new ContentValues();
-        String normName = IngredientNormalizer.normalize(item.getName());
-        String normUnit = UnitConverter.normalizeUnit(item.getUnit());
-
-        values.put(COL_PANTRY_NAME, item.getName().trim());
-        values.put(COL_PANTRY_NORM_NAME, normName);
-        values.put(COL_PANTRY_QUANTITY, item.getQuantity());
-        values.put(COL_PANTRY_UNIT, normUnit);
-        values.put(COL_PANTRY_EXPIRY, item.hasExpiryDate() ? item.getExpiryDate().trim() : null);
-        values.put(COL_PANTRY_UPDATED, System.currentTimeMillis());
-
-        item.setNormalizedName(normName);
-        item.setUnit(normUnit);
-
-        return db.update(
-                TABLE_PANTRY,
-                values,
-                COL_PANTRY_ID + " = ?",
-                new String[]{String.valueOf(item.getId())}
-        );
+        ContentValues values = toContentValues(item);
+        item.setNormalizedName(values.getAsString(COL_PANTRY_NORM_NAME));
+        item.setUnit(values.getAsString(COL_PANTRY_UNIT));
+        return getWritableDatabase().update(TABLE_PANTRY, values,
+                COL_PANTRY_ID + " = ?", new String[]{String.valueOf(item.getId())});
     }
 
     /**
-     * DELETE: Deletes a PantryItem record by primary key _id.
+     * DELETE: deletes a pantry item by id.
      *
-     * @return Number of rows deleted (1 if found and deleted, 0 otherwise).
+     * @return number of rows deleted (1 if successful, 0 if the id does not exist)
      */
     public int deletePantryItem(long id) {
-        SQLiteDatabase db = this.getWritableDatabase();
-        return db.delete(
-                TABLE_PANTRY,
-                COL_PANTRY_ID + " = ?",
-                new String[]{String.valueOf(id)}
-        );
+        return getWritableDatabase().delete(TABLE_PANTRY,
+                COL_PANTRY_ID + " = ?", new String[]{String.valueOf(id)});
     }
 
-    /**
-     * Clears all user pantry items (used in Settings reset or testing).
-     */
+    /** Deletes every pantry item (Settings > Clear All). */
     public void clearAllPantryItems() {
-        SQLiteDatabase db = this.getWritableDatabase();
-        db.delete(TABLE_PANTRY, null, null);
+        getWritableDatabase().delete(TABLE_PANTRY, null, null);
     }
 
     /**
-     * Deducts the required ingredients of a cooked recipe from the user's pantry.
-     * Removes any pantry item whose remaining quantity reaches 0.
+     * Replaces the whole pantry with the demo items in one transaction.
+     *
+     * @return number of items inserted
      */
-    public void consumeRecipeIngredients(Recipe recipe) {
-        if (recipe == null || recipe.getIngredients() == null) {
-            return;
-        }
-        List<PantryItem> currentPantry = getAllPantryItems();
-        SQLiteDatabase db = this.getWritableDatabase();
+    public int loadSamplePantry() {
+        List<PantryItem> samples = SamplePantryData.build(Calendar.getInstance());
+        SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
         try {
-            for (RecipeIngredient req : recipe.getIngredients()) {
-                String reqNorm = IngredientNormalizer.normalize(req.getIngredientName());
-                String reqUnit = UnitConverter.normalizeUnit(req.getRequiredUnit());
-                double remainingToDeduct = req.getRequiredQuantity();
+            db.delete(TABLE_PANTRY, null, null);
+            for (PantryItem item : samples) {
+                insertPantryItem(item);
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return samples.size();
+    }
 
-                for (PantryItem item : currentPantry) {
-                    if (remainingToDeduct <= 1e-6) {
+    /**
+     * "Mark as cooked": subtracts each required ingredient from the pantry.
+     *
+     * The recipe is re-checked first, using the same rules as the Suggested Recipes screen, so
+     * nothing is deducted unless the user really has everything. Stock that expires soonest is
+     * used first, rows that reach zero are deleted, and all changes happen in one transaction
+     * (either every ingredient is deducted or none are).
+     *
+     * @return true if the ingredients were deducted, false if the recipe is not a strict match
+     */
+    public boolean consumeRecipeIngredients(Recipe recipe, boolean excludeExpired) {
+        if (recipe == null || recipe.getIngredients().isEmpty()) {
+            return false;
+        }
+        List<PantryItem> pantry = getAllPantryItems();
+        if (!StrictRecipeMatcher.evaluateRecipe(recipe, pantry, excludeExpired).isStrictMatch()) {
+            return false;
+        }
+
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            for (RecipeIngredient required : recipe.getIngredients()) {
+                String requiredUnit = required.getRequiredUnit();
+                double remaining = required.getRequiredQuantity();
+
+                List<PantryItem> usable =
+                        StrictRecipeMatcher.findUsablePantryItems(required, pantry, excludeExpired);
+                Collections.sort(usable, (a, b) ->
+                        Long.compare(a.getDaysUntilExpiry(), b.getDaysUntilExpiry()));
+
+                for (PantryItem item : usable) {
+                    if (remaining <= 1e-6) {
                         break;
                     }
-                    if (reqNorm.equals(item.getNormalizedName())
-                            && UnitConverter.areUnitsCompatible(item.getUnit(), reqUnit)) {
-                        double itemAvailableInReqUnit = UnitConverter.convert(
-                                item.getQuantity(), item.getUnit(), reqUnit);
-                        if (itemAvailableInReqUnit <= remainingToDeduct + 1e-6) {
-                            remainingToDeduct -= itemAvailableInReqUnit;
-                            item.setQuantity(0);
-                            deletePantryItem(item.getId());
-                        } else {
-                            double newQtyInReqUnit = itemAvailableInReqUnit - remainingToDeduct;
-                            double newQtyInItemUnit = UnitConverter.convert(
-                                    newQtyInReqUnit, reqUnit, item.getUnit());
-                            remainingToDeduct = 0;
-                            item.setQuantity(newQtyInItemUnit);
-                            updatePantryItem(item);
-                        }
+                    double availableInRequiredUnit =
+                            UnitConverter.convert(item.getQuantity(), item.getUnit(), requiredUnit);
+                    if (availableInRequiredUnit <= remaining + 1e-6) {
+                        remaining -= availableInRequiredUnit;
+                        item.setQuantity(0);
+                        deletePantryItem(item.getId());
+                    } else {
+                        double leftOver = availableInRequiredUnit - remaining;
+                        remaining = 0;
+                        item.setQuantity(UnitConverter.convert(leftOver, requiredUnit, item.getUnit()));
+                        updatePantryItem(item);
                     }
+                }
+                if (remaining > 1e-6) {
+                    return false; // should not happen after the strict check; transaction is rolled back
                 }
             }
             db.setTransactionSuccessful();
+            return true;
         } finally {
             db.endTransaction();
         }
     }
 
     // =========================================================================
-    // RECIPE QUERIES & DEMO SEEDING
+    // RECIPE QUERIES
     // =========================================================================
+
+    public int getRecipeCount() {
+        return (int) DatabaseUtils.queryNumEntries(getReadableDatabase(), TABLE_RECIPES);
+    }
 
     /**
      * Retrieves all pre-loaded recipes along with their required ingredients.
      */
     public List<Recipe> getAllRecipesWithIngredients() {
         List<Recipe> recipes = new ArrayList<>();
-        SQLiteDatabase db = this.getReadableDatabase();
-
-        // Ensure recipes are seeded if table was somehow emptied
-        Cursor countCursor = db.rawQuery("SELECT COUNT(*) FROM " + TABLE_RECIPES, null);
-        if (countCursor != null) {
-            try {
-                if (countCursor.moveToFirst() && countCursor.getInt(0) == 0) {
-                    RecipeSeeder.seedRecipes(db);
-                }
-            } finally {
-                countCursor.close();
-            }
-        }
-
-        Cursor cursor = db.query(
-                TABLE_RECIPES,
-                null,
-                null,
-                null,
-                null,
-                null,
-                COL_RECIPE_ID + " ASC"
-        );
-
-        if (cursor != null) {
-            try {
-                while (cursor.moveToNext()) {
-                    Recipe recipe = mapCursorToRecipe(cursor);
-                    recipe.setIngredients(getIngredientsForRecipe(db, recipe.getId()));
-                    recipes.add(recipe);
-                }
-            } finally {
-                cursor.close();
+        SQLiteDatabase db = getReadableDatabase();
+        try (Cursor cursor = db.query(TABLE_RECIPES, null, null, null, null, null,
+                COL_RECIPE_ID + " ASC")) {
+            while (cursor.moveToNext()) {
+                Recipe recipe = mapCursorToRecipe(cursor);
+                recipe.setIngredients(getIngredientsForRecipe(db, recipe.getId()));
+                recipes.add(recipe);
             }
         }
         return recipes;
     }
 
     /**
-     * Retrieves a single Recipe and its ingredients by ID.
+     * Retrieves a single recipe and its ingredients by id, or null if it does not exist.
      */
     public Recipe getRecipeById(long recipeId) {
-        SQLiteDatabase db = this.getReadableDatabase();
-        Cursor cursor = db.query(
-                TABLE_RECIPES,
-                null,
-                COL_RECIPE_ID + " = ?",
-                new String[]{String.valueOf(recipeId)},
-                null,
-                null,
-                null
-        );
-
-        if (cursor != null) {
-            try {
-                if (cursor.moveToFirst()) {
-                    Recipe recipe = mapCursorToRecipe(cursor);
-                    recipe.setIngredients(getIngredientsForRecipe(db, recipe.getId()));
-                    return recipe;
-                }
-            } finally {
-                cursor.close();
+        SQLiteDatabase db = getReadableDatabase();
+        try (Cursor cursor = db.query(TABLE_RECIPES, null, COL_RECIPE_ID + " = ?",
+                new String[]{String.valueOf(recipeId)}, null, null, null)) {
+            if (cursor.moveToFirst()) {
+                Recipe recipe = mapCursorToRecipe(cursor);
+                recipe.setIngredients(getIngredientsForRecipe(db, recipe.getId()));
+                return recipe;
             }
         }
         return null;
@@ -386,56 +347,49 @@ public class PantryDatabaseHelper extends SQLiteOpenHelper {
 
     private List<RecipeIngredient> getIngredientsForRecipe(SQLiteDatabase db, long recipeId) {
         List<RecipeIngredient> list = new ArrayList<>();
-        Cursor c = db.query(
-                TABLE_RECIPE_INGREDIENTS,
-                null,
-                COL_RI_RECIPE_ID + " = ?",
-                new String[]{String.valueOf(recipeId)},
-                null,
-                null,
-                COL_RI_ID + " ASC"
-        );
-        if (c != null) {
-            try {
-                while (c.moveToNext()) {
-                    RecipeIngredient ri = new RecipeIngredient(
-                            c.getLong(c.getColumnIndexOrThrow(COL_RI_ID)),
-                            c.getLong(c.getColumnIndexOrThrow(COL_RI_RECIPE_ID)),
-                            c.getString(c.getColumnIndexOrThrow(COL_RI_NAME)),
-                            c.getString(c.getColumnIndexOrThrow(COL_RI_NORM_NAME)),
-                            c.getDouble(c.getColumnIndexOrThrow(COL_RI_QUANTITY)),
-                            c.getString(c.getColumnIndexOrThrow(COL_RI_UNIT))
-                    );
-                    list.add(ri);
-                }
-            } finally {
-                c.close();
+        try (Cursor c = db.query(TABLE_RECIPE_INGREDIENTS, null, COL_RI_RECIPE_ID + " = ?",
+                new String[]{String.valueOf(recipeId)}, null, null, COL_RI_ID + " ASC")) {
+            while (c.moveToNext()) {
+                list.add(new RecipeIngredient(
+                        c.getLong(c.getColumnIndexOrThrow(COL_RI_ID)),
+                        c.getLong(c.getColumnIndexOrThrow(COL_RI_RECIPE_ID)),
+                        c.getString(c.getColumnIndexOrThrow(COL_RI_NAME)),
+                        c.getString(c.getColumnIndexOrThrow(COL_RI_NORM_NAME)),
+                        c.getDouble(c.getColumnIndexOrThrow(COL_RI_QUANTITY)),
+                        c.getString(c.getColumnIndexOrThrow(COL_RI_UNIT))
+                ));
             }
         }
         return list;
     }
 
-    /**
-     * Seeds realistic sample pantry items so a marker or user can immediately test strict
-     * matching, unit conversions, and singular/plural normalization with one tap.
-     */
-    public void seedSamplePantryItems() {
-        clearAllPantryItems();
-        insertPantryItem(new PantryItem("Large Eggs", "egg", 6, "pcs", "2026-10-24"));
-        insertPantryItem(new PantryItem("Bread Slices", "bread", 8, "slice", "2026-10-19"));
-        insertPantryItem(new PantryItem("Butter", "butter", 250, "g", "2026-11-15"));
-        insertPantryItem(new PantryItem("Cheddar Cheese", "cheddar cheese", 200, "g", "2026-10-20"));
-        insertPantryItem(new PantryItem("Fresh Tomatoes", "tomato", 4, "pcs", "2026-10-18"));
-        insertPantryItem(new PantryItem("Onions", "onion", 3, "pcs", "2026-11-05"));
-        insertPantryItem(new PantryItem("Garlic Cloves", "garlic", 6, "clove", "2026-11-10"));
-        insertPantryItem(new PantryItem("Full Cream Milk", "milk", 1, "l", "2026-10-21"));
-        insertPantryItem(new PantryItem("Cake Flour", "flour", 1, "kg", "2027-01-15"));
-        insertPantryItem(new PantryItem("Cooking Oil", "cooking oil", 500, "ml", "2027-03-01"));
-        insertPantryItem(new PantryItem("Salt", "salt", 200, "g", null));
-        insertPantryItem(new PantryItem("Black Pepper", "black pepper", 50, "g", null));
+    // =========================================================================
+    // HELPERS
+    // =========================================================================
+
+    private List<PantryItem> queryPantry(String selection, String[] selectionArgs) {
+        List<PantryItem> items = new ArrayList<>();
+        try (Cursor cursor = getReadableDatabase().query(TABLE_PANTRY, null, selection, selectionArgs,
+                null, null, COL_PANTRY_NAME + " COLLATE NOCASE ASC")) {
+            while (cursor.moveToNext()) {
+                items.add(mapCursorToPantryItem(cursor));
+            }
+        }
+        return items;
     }
 
-    private PantryItem mapCursorToPantryItem(Cursor cursor) {
+    private static ContentValues toContentValues(PantryItem item) {
+        ContentValues values = new ContentValues();
+        values.put(COL_PANTRY_NAME, item.getName().trim());
+        values.put(COL_PANTRY_NORM_NAME, IngredientNormalizer.normalize(item.getName()));
+        values.put(COL_PANTRY_QUANTITY, item.getQuantity());
+        values.put(COL_PANTRY_UNIT, UnitConverter.normalizeUnit(item.getUnit()));
+        values.put(COL_PANTRY_EXPIRY, item.hasExpiryDate() ? item.getExpiryDate().trim() : null);
+        values.put(COL_PANTRY_UPDATED, System.currentTimeMillis());
+        return values;
+    }
+
+    private static PantryItem mapCursorToPantryItem(Cursor cursor) {
         return new PantryItem(
                 cursor.getLong(cursor.getColumnIndexOrThrow(COL_PANTRY_ID)),
                 cursor.getString(cursor.getColumnIndexOrThrow(COL_PANTRY_NAME)),
@@ -447,7 +401,7 @@ public class PantryDatabaseHelper extends SQLiteOpenHelper {
         );
     }
 
-    private Recipe mapCursorToRecipe(Cursor cursor) {
+    private static Recipe mapCursorToRecipe(Cursor cursor) {
         return new Recipe(
                 cursor.getLong(cursor.getColumnIndexOrThrow(COL_RECIPE_ID)),
                 cursor.getString(cursor.getColumnIndexOrThrow(COL_RECIPE_TITLE)),
